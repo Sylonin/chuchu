@@ -1,6 +1,7 @@
 package com.jossephus.chuchu.service.multiplexer
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class TmuxMultiplexerTest {
@@ -74,15 +75,11 @@ class TmuxMultiplexerTest {
     }
 
     @Test
-    fun listSessionsCommandChecksExecutableBeforeTreatingNoServerAsEmptySuccess() {
+    fun listSessionsCommandAvoidsVariablesThatAreReadOnlyInZsh() {
+        // zsh aborts a `-c` script that assigns `status`, so the exit marker never prints.
         val command = TmuxMultiplexer.listSessionsCommand()
 
-        assertEquals(
-            "if ! command -v tmux >/dev/null 2>&1; then printf 'tmux executable not found\\n' >&2; false; " +
-                "else tmux list-sessions -F '#{session_name}\t#{session_attached}' 2>/dev/null; " +
-                "status=\$?; if [ \"\$status\" -eq 1 ]; then true; else [ \"\$status\" -eq 0 ]; fi; fi",
-            command,
-        )
+        assertFalse(Regex("""(^|[\s;])(status|pipestatus)=""").containsMatchIn(command))
     }
 
     @Test

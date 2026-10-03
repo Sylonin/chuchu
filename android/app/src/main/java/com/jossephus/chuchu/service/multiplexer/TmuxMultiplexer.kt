@@ -12,7 +12,7 @@ object TmuxMultiplexer : Multiplexer {
     override fun listSessionsCommand(): String =
         "if ! command -v tmux >/dev/null 2>&1; then printf 'tmux executable not found\\n' >&2; false; " +
             "else tmux list-sessions -F '#{session_name}\t#{session_attached}' 2>/dev/null; " +
-            "status=\$?; if [ \"\$status\" -eq 1 ]; then true; else [ \"\$status\" -eq 0 ]; fi; fi"
+            "rc=\$?; if [ \"\$rc\" -eq 1 ]; then true; else [ \"\$rc\" -eq 0 ]; fi; fi"
 
     override fun parseSessions(output: String): List<RemoteMultiplexerSession> =
         output
