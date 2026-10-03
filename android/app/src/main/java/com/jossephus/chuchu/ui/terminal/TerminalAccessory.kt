@@ -12,13 +12,40 @@ data class ModifierState(
     val alt: Boolean = false,
     val shift: Boolean = false,
     val cmd: Boolean = false,
+    val locked: Set<TerminalModifier> = emptySet(),
 ) {
-    fun toggle(modifier: TerminalModifier): ModifierState = when (modifier) {
-        TerminalModifier.Ctrl -> copy(ctrl = !ctrl)
-        TerminalModifier.Alt -> copy(alt = !alt)
-        TerminalModifier.Shift -> copy(shift = !shift)
-        TerminalModifier.Cmd -> copy(cmd = !cmd)
+    private fun activate(modifier: TerminalModifier): ModifierState = when (modifier) {
+        TerminalModifier.Ctrl -> copy(ctrl = true)
+        TerminalModifier.Alt -> copy(alt = true)
+        TerminalModifier.Shift -> copy(shift = true)
+        TerminalModifier.Cmd -> copy(cmd = true)
     }
+
+    private fun deactivate(modifier: TerminalModifier): ModifierState {
+        val unlocked = locked - modifier
+        return when (modifier) {
+            TerminalModifier.Ctrl -> copy(ctrl = false, locked = unlocked)
+            TerminalModifier.Alt -> copy(alt = false, locked = unlocked)
+            TerminalModifier.Shift -> copy(shift = false, locked = unlocked)
+            TerminalModifier.Cmd -> copy(cmd = false, locked = unlocked)
+        }
+    }
+
+    fun toggle(modifier: TerminalModifier): ModifierState =
+        if (isEnabled(modifier)) deactivate(modifier) else activate(modifier)
+
+    fun toggleLock(modifier: TerminalModifier): ModifierState =
+        if (modifier in locked) deactivate(modifier) else activate(modifier).copy(locked = locked + modifier)
+
+    fun isLocked(modifier: TerminalModifier): Boolean = modifier in locked
+
+    fun consumeOneShot(): ModifierState = ModifierState(
+        ctrl = ctrl && TerminalModifier.Ctrl in locked,
+        alt = alt && TerminalModifier.Alt in locked,
+        shift = shift && TerminalModifier.Shift in locked,
+        cmd = cmd && TerminalModifier.Cmd in locked,
+        locked = locked,
+    )
 
     fun isEnabled(modifier: TerminalModifier): Boolean = when (modifier) {
         TerminalModifier.Ctrl -> ctrl
@@ -98,6 +125,8 @@ enum class TerminalSpecialKey(
 sealed interface AccessoryAction {
     data class ToggleModifier(val modifier: TerminalModifier) : AccessoryAction
 
+    data class LockModifier(val modifier: TerminalModifier) : AccessoryAction
+
     data class SendSpecialKey(val key: TerminalSpecialKey) : AccessoryAction
 
     data class SendText(val text: String) : AccessoryAction
@@ -149,14 +178,18 @@ object TerminalAccessoryDispatcher {
             modifierState = modifierState.toggle(action.modifier),
         )
 
+        is AccessoryAction.LockModifier -> AccessoryDispatchResult(
+            modifierState = modifierState.toggleLock(action.modifier),
+        )
+
         is AccessoryAction.SendSpecialKey -> AccessoryDispatchResult(
-            modifierState = modifierState,
+            modifierState = modifierState.consumeOneShot(),
             specialKey = action.key,
             suppressImeInput = true,
         )
 
         is AccessoryAction.SendText -> AccessoryDispatchResult(
-            modifierState = modifierState,
+            modifierState = modifierState.consumeOneShot(),
             text = modifierState.applyToText(action.text),
         )
 

@@ -1,9 +1,10 @@
 package com.jossephus.chuchu.ui.components
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -83,9 +84,11 @@ fun ChuButtonSurface(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ChuButton(
     onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     variant: ChuButtonVariant = ChuButtonVariant.Filled,
@@ -121,11 +124,12 @@ fun ChuButton(
     ChuButtonSurface(
         modifier = modifier
             .then(semanticsModifier)
-            .clickable(
+            .combinedClickable(
                 enabled = enabled,
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = onClick,
+                onLongClick = onLongClick,
             ),
         enabled = enabled,
         pressed = pressed,

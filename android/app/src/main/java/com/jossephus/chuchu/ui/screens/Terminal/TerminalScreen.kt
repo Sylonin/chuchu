@@ -948,7 +948,9 @@ fun TerminalScreen(
                     }
                     val text = clip.getItemAt(0).coerceToText(context).toString()
                     if (text.isNotEmpty()) {
-                        vm.onPasteText(modifierState.applyToText(text))
+                        val activeModifiers = modifierState
+                        vm.onPasteText(activeModifiers.applyToText(text))
+                        modifierState = activeModifiers.consumeOneShot()
                         selection = null
                         selectionState = null
                         return true
@@ -1548,6 +1550,7 @@ fun TerminalScreen(
                                                             text,
                                                             modifierState,
                                                         )
+                                                        modifierState = modifierState.consumeOneShot()
                                                     }
                                                 }
                                                 onTerminalKey = { key, codepoint, mods, action, charCode ->
@@ -1643,6 +1646,9 @@ fun TerminalScreen(
                                                             action,
                                                             charCode,
                                                         )
+                                                        if (action == GhosttyKeyAction.Press) {
+                                                            modifierState = modifierState.consumeOneShot()
+                                                        }
                                                     }
                                                 }
                                                 setOnFocusChangeListener { _, hasFocus ->
@@ -1841,8 +1847,7 @@ fun TerminalScreen(
                                 }
                             }
 
-                            // Preserve sticky modifiers: paste applies active modifiers
-                            // but does not clear them.
+                            // pasteClipboard() applies and consumes one-shot modifiers.
                             if (result.shouldPaste) {
                                 pasteClipboard()
                             }

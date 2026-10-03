@@ -38,6 +38,7 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -273,7 +274,9 @@ private fun AccessoryButton(
         ToggleButton(
             label = item.label,
             enabled = modifierState.isEnabled(toggleModifier),
+            locked = modifierState.isLocked(toggleModifier),
             onClick = { onAction(item.action) },
+            onLongClick = { onAction(AccessoryAction.LockModifier(toggleModifier)) },
             modifier = Modifier.height(buttonHeight),
             contentPadding = buttonPadding,
         )
@@ -427,22 +430,30 @@ private fun RepeatableAccessoryButton(
 private fun ToggleButton(
     label: String,
     enabled: Boolean,
+    locked: Boolean,
     onClick: () -> Unit,
+    onLongClick: () -> Unit,
     modifier: Modifier,
     contentPadding: PaddingValues,
 ) {
     val colors = ChuColors.current
     val typography = ChuTypography.current
+    val haptics = LocalHapticFeedback.current
     val activeLabel = if (enabled) "• $label" else label
+    val labelStyle = if (locked) typography.label.copy(textDecoration = TextDecoration.Underline) else typography.label
     ChuButton(
         onClick = onClick,
+        onLongClick = {
+            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+            onLongClick()
+        },
         modifier = modifier,
         contentPadding = contentPadding,
         variant = if (enabled) ChuButtonVariant.Filled else ChuButtonVariant.Outlined,
     ) {
         ChuText(
             activeLabel,
-            style = typography.label,
+            style = labelStyle,
             color = if (enabled) colors.onAccent else colors.textSecondary,
         )
     }
