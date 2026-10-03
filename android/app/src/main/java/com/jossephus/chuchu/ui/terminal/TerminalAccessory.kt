@@ -210,6 +210,7 @@ object TerminalAccessoryLayoutStore {
     private val catalogItems: List<AccessoryKeyItem> = listOf(
         AccessoryKeyItem("tab", "Tab", AccessoryAction.SendSpecialKey(TerminalSpecialKey.Tab)),
         AccessoryKeyItem("shift_tab", "S-Tab", AccessoryAction.SendSpecialKey(TerminalSpecialKey.Tab, extraMods = SHIFT_MOD)),
+        AccessoryKeyItem("ctrl_b", "C-b", AccessoryAction.SendText("\u0002")),
         AccessoryKeyItem("enter", TerminalSpecialKey.Enter.label, AccessoryAction.SendSpecialKey(TerminalSpecialKey.Enter)),
         AccessoryKeyItem("space", "Space", AccessoryAction.SendText(" ")),
         AccessoryKeyItem("escape", "Esc", AccessoryAction.SendSpecialKey(TerminalSpecialKey.Escape)),

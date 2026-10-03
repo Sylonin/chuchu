@@ -155,6 +155,13 @@ class AccessoryLogicTest {
     }
 
     @Test
+    fun `ctrl_b catalog item sends the tmux prefix byte`() {
+        val item = TerminalAccessoryLayoutStore.catalog().first { it.id == "ctrl_b" }
+        val r = TerminalAccessoryDispatcher.dispatch(item.action, ModifierState())
+        assertEquals("\u0002", r.text)
+    }
+
+    @Test
     fun `shift_tab catalog item sends Tab with forced Shift`() {
         val item = TerminalAccessoryLayoutStore.catalog().first { it.id == "shift_tab" }
         val r = TerminalAccessoryDispatcher.dispatch(item.action, ModifierState())
