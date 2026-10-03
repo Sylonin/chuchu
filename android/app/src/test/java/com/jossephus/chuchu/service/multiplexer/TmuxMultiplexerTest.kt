@@ -83,14 +83,25 @@ class TmuxMultiplexerTest {
     }
 
     @Test
-    fun parsesSessionList() {
-        val sessions = TmuxMultiplexer.parseSessions("main\t1\nwork\t0\n")
+    fun parsesSessionListWithAttachedClientCountsAndNamesContainingSpaces() {
+        val sessions = TmuxMultiplexer.parseSessions("0 work\n1 main\n2 work space\n")
 
         assertEquals(
             listOf(
-                RemoteMultiplexerSession(name = "main", attached = true),
                 RemoteMultiplexerSession(name = "work", attached = false),
+                RemoteMultiplexerSession(name = "main", attached = true),
+                RemoteMultiplexerSession(name = "work space", attached = true),
             ),
+            sessions,
+        )
+    }
+
+    @Test
+    fun skipsMalformedSessionListLines() {
+        val sessions = TmuxMultiplexer.parseSessions("missing-separator\n1 \n")
+
+        assertEquals(
+            emptyList<RemoteMultiplexerSession>(),
             sessions,
         )
     }
