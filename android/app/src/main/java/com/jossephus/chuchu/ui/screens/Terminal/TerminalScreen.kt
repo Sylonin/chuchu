@@ -1038,7 +1038,10 @@ fun TerminalScreen(
                         }
 
                         result.specialKey?.let { key ->
-                            vm.onSpecialKeyInput(key, currentModifierState.terminalMods())
+                            vm.onSpecialKeyInput(
+                                key,
+                                currentModifierState.terminalMods() or result.specialKeyExtraMods,
+                            )
                         }
 
                         result.text?.let { text -> vm.onTextInput(text) }
@@ -1836,7 +1839,7 @@ fun TerminalScreen(
                                     result.specialKey?.let { key ->
                                         vm.onSpecialKeyInput(
                                             key,
-                                            preDispatchModifierState.terminalMods(),
+                                            preDispatchModifierState.terminalMods() or result.specialKeyExtraMods,
                                         )
                                     }
                                     result.text?.let { text ->

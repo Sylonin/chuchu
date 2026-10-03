@@ -155,6 +155,14 @@ class AccessoryLogicTest {
     }
 
     @Test
+    fun `shift_tab catalog item sends Tab with forced Shift`() {
+        val item = TerminalAccessoryLayoutStore.catalog().first { it.id == "shift_tab" }
+        val r = TerminalAccessoryDispatcher.dispatch(item.action, ModifierState())
+        assertEquals(TerminalSpecialKey.Tab, r.specialKey)
+        assertEquals(SHIFT_MOD, r.specialKeyExtraMods)
+    }
+
+    @Test
     fun `dispatch LockModifier locks`() {
         val r = TerminalAccessoryDispatcher.dispatch(
             AccessoryAction.LockModifier(TerminalModifier.Alt),
