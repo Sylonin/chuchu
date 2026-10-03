@@ -1,0 +1,9 @@
+Iosevka Nerd Font Mono Regular
+Iosevka Term Nerd Font Mono Regular
+Copyright (c) 2015-2023, Renzhi Li (aka. Belleve Invis); Nerd Fonts patch (https://github.com/ryanoasis/nerd-fonts)
+
+Source (Nerd Fonts v3.5.1):
+https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.1/Iosevka.zip (IosevkaNerdFontMono-Regular.ttf)
+https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.1/IosevkaTerm.zip (IosevkaTermNerdFontMono-Regular.ttf)
+
+Licensed under the SIL Open Font License 1.1. See iosevka_nerd_font_license.md.

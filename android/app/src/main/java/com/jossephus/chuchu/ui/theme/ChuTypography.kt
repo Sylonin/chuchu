@@ -26,6 +26,8 @@ enum class ChuFontOption(
     val label: String,
     val regularFontResId: Int,
 ) {
+    IosevkaNerdFont("iosevka_nerd_font", "Iosevka Nerd Font", R.font.iosevka_nerd_font_mono_regular),
+    IosevkaTermNerdFont("iosevka_term_nerd_font", "Iosevka Term Nerd Font", R.font.iosevka_term_nerd_font_mono_regular),
     JetBrainsMono("jetbrains_mono", "JetBrains Mono", R.font.jetbrains_mono_regular),
     FiraCode("fira_code", "Fira Code", R.font.fira_code_regular),
     Hack("hack", "Hack", R.font.hack_regular),
@@ -33,7 +35,7 @@ enum class ChuFontOption(
     ;
 
     companion object {
-        val default: ChuFontOption = JetBrainsMono
+        val default: ChuFontOption = IosevkaNerdFont
 
         fun fromId(id: String?): ChuFontOption {
             if (id.isNullOrBlank()) return default

@@ -228,7 +228,7 @@ class SettingsRepository(context: Context) {
         const val DEFAULT_THEME = "Catppuccin Mocha"
         const val DEFAULT_LIGHT_THEME = "Catppuccin Latte"
         val DEFAULT_THEME_MODE = ThemeMode.System
-        const val DEFAULT_FONT = "jetbrains_mono"
+        const val DEFAULT_FONT = "iosevka_nerd_font"
         const val DEFAULT_TERMINAL_FONT_SIZE = 14f
         const val MIN_TERMINAL_FONT_SIZE = 6f
         const val MAX_TERMINAL_FONT_SIZE = 72f
