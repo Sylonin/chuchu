@@ -69,6 +69,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
     private var pendingMultiplexerAction: PendingMultiplexerAction? = null
     private var multiplexerActionGeneration = 0L
     private var multiplexerSessionListGeneration = 0L
+    private var multiplexerDuplicateInFlight = false
 
     private val _tailscaleActive = MutableStateFlow(tailscaleStatusChecker.isActive())
     val tailscaleActive: StateFlow<Boolean> = _tailscaleActive.asStateFlow()
@@ -175,24 +176,38 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun startMultiplexerDuplicate(spec: TabSpec) {
+        if (multiplexerDuplicateInFlight) return
+        multiplexerDuplicateInFlight = true
+        _multiplexerState.value =
+            _multiplexerState.value.copy(
+                duplicateLoading = true,
+                preflightError = null,
+            )
         val duplicateSpec = spec.copy(
             multiplexer = spec.multiplexer ?: MultiplexerRegistry.defaultType,
             multiplexerSessionName = null,
             multiplexerCreateIfMissing = true,
         )
         viewModelScope.launch(Dispatchers.IO) {
-            val result = runCatching { sessionRepository.resolveMultiplexerSessionName(duplicateSpec) }
-            withContext(Dispatchers.Main) {
-                result.fold(
-                    onSuccess = { name ->
-                        openTab(duplicateSpec.copy(multiplexerSessionName = name))
-                    },
-                    onFailure = { error ->
-                        _multiplexerState.value = _multiplexerState.value.copy(
-                            preflightError = error.message ?: "Could not create multiplexer session",
-                        )
-                    },
-                )
+            try {
+                val result = runCatching { sessionRepository.resolveMultiplexerSessionName(duplicateSpec) }
+                withContext(Dispatchers.Main) {
+                    result.fold(
+                        onSuccess = { name ->
+                            openTab(duplicateSpec.copy(multiplexerSessionName = name))
+                        },
+                        onFailure = { error ->
+                            _multiplexerState.value = _multiplexerState.value.copy(
+                                preflightError = error.message ?: "Could not create multiplexer session",
+                            )
+                        },
+                    )
+                }
+            } finally {
+                withContext(NonCancellable + Dispatchers.Main) {
+                    multiplexerDuplicateInFlight = false
+                    _multiplexerState.value = _multiplexerState.value.copy(duplicateLoading = false)
+                }
             }
         }
     }
@@ -827,6 +842,7 @@ data class MultiplexerUiState(
     val preflightError: String? = null,
     val preflightLoading: Boolean = false,
     val preflightHostLabel: String? = null,
+    val duplicateLoading: Boolean = false,
     val sessions: List<RemoteMultiplexerSession> = emptyList(),
     val sessionsLoading: Boolean = false,
     val sessionsError: String? = null,
