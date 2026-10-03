@@ -103,6 +103,7 @@ import com.jossephus.chuchu.ui.terminal.GhosttyKey
 import com.jossephus.chuchu.ui.terminal.GhosttyKeyAction
 import com.jossephus.chuchu.ui.terminal.KeyboardAccessoryBar
 import com.jossephus.chuchu.ui.terminal.ModifierState
+import com.jossephus.chuchu.ui.terminal.LShapeGesture
 import com.jossephus.chuchu.ui.terminal.TerminalAccessoryDispatcher
 import com.jossephus.chuchu.ui.terminal.TerminalAccessoryLayoutStore
 import com.jossephus.chuchu.ui.terminal.TerminalCanvas
@@ -1417,6 +1418,15 @@ fun TerminalScreen(
                                     onPrimaryClick = vm::onPrimaryMouseClick,
                                     onAppSelectionDrag = vm::onAppSelectionDrag,
                                     onScroll = vm::onScroll,
+                                    onLShapeGesture = { gesture ->
+                                        // tmux default prefix C-b, then previous-window / next-window.
+                                        vm.onTextInput(
+                                            when (gesture) {
+                                                LShapeGesture.LeftUp -> "\u0002p"
+                                                LShapeGesture.RightUp -> "\u0002n"
+                                            },
+                                        )
+                                    },
                                     onFontSizeChange = { sizeSp -> terminalFontSizeSp = sizeSp },
                                     onSelectionChanged = { state -> selectionState = state },
                                 )

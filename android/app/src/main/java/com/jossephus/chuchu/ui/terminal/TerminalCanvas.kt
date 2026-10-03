@@ -81,6 +81,7 @@ fun TerminalCanvas(
     onPrimaryClick: (x: Float, y: Float) -> Unit = { _, _ -> },
     onAppSelectionDrag: (action: Int, x: Float, y: Float) -> Unit = { _, _, _ -> },
     onScroll: (delta: Int, x: Float, y: Float) -> Unit = { _, _, _ -> },
+    onLShapeGesture: (LShapeGesture) -> Unit = {},
     minFontSizeSp: Float = 1f,
     maxFontSizeSp: Float = Float.MAX_VALUE,
     onFontSizeChange: (sizeSp: Float) -> Unit = {},
@@ -100,6 +101,7 @@ fun TerminalCanvas(
     val longPressTimeoutMillis = remember { ViewConfiguration.getLongPressTimeout().toLong() }
     val autoScrollEdgeZonePx = with(density) { 48.dp.toPx() }
     val autoScrollIntervalMs = 55L
+    val lShapeLegPx = with(density) { 56.dp.toPx() }
     val doubleTapTimeoutMillis = remember { ViewConfiguration.getDoubleTapTimeout().toLong() }
     val doubleTapSlopPx = remember(androidViewConfiguration) { androidViewConfiguration.scaledDoubleTapSlop.toFloat() }
     val flingState = remember { ScrollFlingState() }
@@ -231,6 +233,8 @@ fun TerminalCanvas(
     val currentFlingDecay = rememberUpdatedState(flingDecay)
     val currentMinFlingVelocityPx = rememberUpdatedState(minFlingVelocityPx)
     val currentMaxFlingVelocityPx = rememberUpdatedState(maxFlingVelocityPx)
+    val currentOnLShapeGesture = rememberUpdatedState(onLShapeGesture)
+    val currentLShapeLegPx = rememberUpdatedState(lShapeLegPx)
     val ghosttyBridge = remember { GhosttyBridge() }
 
     var selectionViewportBaseline by remember { mutableStateOf<Int?>(null) }
@@ -346,6 +350,8 @@ fun TerminalCanvas(
                         var autoScrollDir = 0
                         val velocityTracker = VelocityTracker()
                         var lastScrollPos = Offset.Zero
+                        val lShape = LShapeGestureDetector(currentLShapeLegPx.value)
+                        lShape.start(down.position)
                         velocityTracker.addPosition(down.uptimeMillis, toSnapshotSpace(down.position, currentSnapshot.value))
 
                         try {
@@ -553,6 +559,12 @@ fun TerminalCanvas(
                                 val dragY = changePos.y - changePrevPos.y
                                 velocityTracker.addPosition(change.uptimeMillis, changePos)
                                 lastScrollPos = changePos
+                                if (!didScroll && !didPinch && dragMode == DragMode.None) {
+                                    lShape.onMove(change.position)?.let { gesture ->
+                                        currentHaptics.value.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        currentOnLShapeGesture.value(gesture)
+                                    }
+                                }
                                 val movedDistance = hypot(
                                     (changePos.x - downPos.x).toDouble(),
                                     (changePos.y - downPos.y).toDouble(),
@@ -572,7 +584,7 @@ fun TerminalCanvas(
                                 autoScrollDir = 0
                                 autoScrollingSelection = false
                                 val verticalIntent = abs(dragY) > abs(dragX) * 1.2f
-                                if (verticalIntent) {
+                                if (verticalIntent && !lShape.isCommitted) {
                                     dragRemainder += dragY / currentCellHeight.value
                                 }
 
