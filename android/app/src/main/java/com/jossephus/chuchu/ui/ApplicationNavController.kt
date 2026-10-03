@@ -247,13 +247,14 @@ fun ApplicationNavController(launchHostId: Long? = null, onLaunchHostConsumed: (
 
     LaunchedEffect(launchHostId) {
         val id = launchHostId ?: return@LaunchedEffect
-        onLaunchHostConsumed()
         val host = HostRepository(AppDatabase.getInstance(application).hostProfileDao()).getById(id)
         if (host == null) {
             Toast.makeText(context, "That server no longer exists", Toast.LENGTH_SHORT).show()
         } else {
             connectToHost(host.id, host.requireAuthOnConnect)
         }
+        // Consume last: clearing the key restarts this effect and would cancel the lookup above.
+        onLaunchHostConsumed()
     }
 
     val settingsRepo = SettingsRepository.getInstance(application)
