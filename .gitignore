@@ -24,3 +24,10 @@ zig-src/.zig-cache/
 zig-src/zig-out/
 zig-out/
 .comview/
+
+# devenv
+.devenv/
+.devenv.flake.nix
+.direnv/
+devenv.local.nix
+.android/

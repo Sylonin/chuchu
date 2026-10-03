@@ -67,6 +67,8 @@ If you have nix installed, the following three steps will get you started
 2. running 'make build' will build the native code needed 
 3. running 'make app' will build the apk and install it in a connected device. 
 
+With [devenv](https://devenv.sh) instead of the flake, `devenv shell` provides Zig, the Android SDK and NDK, Gradle and JDK 21. Inside it, `just apk` builds the native library and an arm64 debug APK, and `just install` installs it on a connected device. `just` lists all recipes.
+
 If you don't have nix installed, you will need
 
 1. setup tools
