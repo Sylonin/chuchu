@@ -1,6 +1,7 @@
 package com.jossephus.chuchu.ui
 
 import android.app.Application
+import android.widget.Toast
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -29,11 +30,13 @@ import com.jossephus.chuchu.ui.screens.Settings.SettingsBackupViewModel
 import com.jossephus.chuchu.ui.screens.Settings.SettingsScreen
 import com.jossephus.chuchu.ui.screens.Terminal.TerminalScreen
 import com.jossephus.chuchu.ui.screens.Terminal.TerminalViewModel
+import com.jossephus.chuchu.data.db.AppDatabase
+import com.jossephus.chuchu.data.repository.HostRepository
 import com.jossephus.chuchu.ui.security.VerificationResult
 import com.jossephus.chuchu.ui.security.requireUserVerification
 
 @Composable
-fun ApplicationNavController() {
+fun ApplicationNavController(launchHostId: Long? = null, onLaunchHostConsumed: () -> Unit = {}) {
     val navController = rememberNavController()
     val context = LocalContext.current
     val application = context.applicationContext as Application
@@ -58,6 +61,23 @@ fun ApplicationNavController() {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    val globalRequireAuthOnConnect by
+        SettingsRepository.getInstance(application).requireAuthOnConnect.collectAsStateWithLifecycle()
+    val connectToHost: (Long, Boolean) -> Unit = connect@{ id, hostRequiresAuth ->
+        if (!globalRequireAuthOnConnect && !hostRequiresAuth) {
+            navController.navigate("terminal/$id")
+            return@connect
+        }
+        requireUserVerification(
+            context = context,
+            title = "Verify to connect",
+            subtitle = "Authenticate to open this server session",
+        ) { result ->
+            if (result == VerificationResult.Success) {
+                navController.navigate("terminal/$id")
+            }
+        }
+    }
     NavHost(navController = navController, startDestination = "servers") {
         composable("servers") {
             val vm: ServerListViewModel =
@@ -92,22 +112,7 @@ fun ApplicationNavController() {
                     },
                 onEditServer = { id -> navController.navigate("servers/edit/$id") },
                 onConnectServer = { id ->
-                    val host = hosts.firstOrNull { it.id == id }
-                    val hostRequiresAuth = host?.requireAuthOnConnect == true
-                    val mustVerify = requireAuthOnConnect || hostRequiresAuth
-                    if (!mustVerify) {
-                        navController.navigate("terminal/$id")
-                    } else {
-                        requireUserVerification(
-                            context = context,
-                            title = "Verify to connect",
-                            subtitle = "Authenticate to open this server session",
-                        ) { result ->
-                            if (result == VerificationResult.Success) {
-                                navController.navigate("terminal/$id")
-                            }
-                        }
-                    }
+                    connectToHost(id, hosts.firstOrNull { it.id == id }?.requireAuthOnConnect == true)
                 },
                 onDeleteServer = vm::deleteServer,
                 onOpenSettings = { navController.navigate("settings") },
@@ -237,6 +242,17 @@ fun ApplicationNavController() {
                 onOpenSettings = { navController.navigate("settings") },
                 onBack = { navController.popBackStack() },
             )
+        }
+    }
+
+    LaunchedEffect(launchHostId) {
+        val id = launchHostId ?: return@LaunchedEffect
+        onLaunchHostConsumed()
+        val host = HostRepository(AppDatabase.getInstance(application).hostProfileDao()).getById(id)
+        if (host == null) {
+            Toast.makeText(context, "That server no longer exists", Toast.LENGTH_SHORT).show()
+        } else {
+            connectToHost(host.id, host.requireAuthOnConnect)
         }
     }
 
