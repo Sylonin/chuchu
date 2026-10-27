@@ -48,12 +48,13 @@ fn resolveNdkHome(b: *std.Build, ndk_root: []const u8) []const u8 {
     if (ndk_root.len == 0) return ndk_root;
 
     const toolchains_path = b.pathJoin(&.{ ndk_root, "toolchains", "llvm" });
-    std.fs.cwd().access(toolchains_path, .{}) catch {
-        var dir = std.fs.cwd().openDir(ndk_root, .{ .iterate = true }) catch return ndk_root;
-        defer dir.close();
+    const io = b.graph.io;
+    std.Io.Dir.cwd().access(io, toolchains_path, .{}) catch {
+        var dir = std.Io.Dir.cwd().openDir(io, ndk_root, .{ .iterate = true }) catch return ndk_root;
+        defer dir.close(io);
 
         var iter = dir.iterate();
-        while (iter.next() catch null) |entry| {
+        while (iter.next(io) catch null) |entry| {
             if (entry.kind != .directory) continue;
             return b.pathJoin(&.{ ndk_root, entry.name });
         }
@@ -82,7 +83,7 @@ fn buildNativeLibrary(
         .optimize = optimize,
     });
 
-    const ndk_root = b.graph.env_map.get("ANDROID_NDK_HOME") orelse b.graph.env_map.get("ANDROID_NDK_ROOT").?;
+    const ndk_root = b.graph.environ_map.get("ANDROID_NDK_HOME") orelse b.graph.environ_map.get("ANDROID_NDK_ROOT").?;
     const ndk_home = resolveNdkHome(b, ndk_root);
 
     const android_target = ndk.getAndroidTriple(target.result) catch {
@@ -136,6 +137,19 @@ fn buildNativeLibrary(
     });
     root_module.addIncludePath(b.path("src/bridge"));
     root_module.addIncludePath(libssh2_upstream.path("include"));
+
+    const translate_c = b.addTranslateC(.{
+        .root_source_file = b.path("src/bridge/chuchu_c.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    translate_c.addIncludePath(b.path("src/bridge"));
+    translate_c.addIncludePath(libssh2_upstream.path("include"));
+    translate_c.addSystemIncludePath(.{ .cwd_relative = include_dir });
+    translate_c.addSystemIncludePath(.{ .cwd_relative = target_include_dir });
+    // Bionic's signedness overload of ioctl() is a redefinition to translate-c.
+    translate_c.defineCMacro("BIONIC_IOCTL_NO_SIGNEDNESS_OVERLOAD", "1");
+    root_module.addImport("c", translate_c.createModule());
     root_module.addImport("ghostty-vt", ghostty_dep.module("ghostty-vt"));
     root_module.addImport("zigimg", zigimg_dep.module("zigimg"));
 
@@ -155,18 +169,18 @@ fn buildNativeLibrary(
     root_module.unwind_tables = .none;
     root_module.omit_frame_pointer = true;
 
-    lib.addIncludePath(.{ .cwd_relative = include_dir });
-    lib.addIncludePath(.{ .cwd_relative = target_include_dir });
+    lib.root_module.addIncludePath(.{ .cwd_relative = include_dir });
+    lib.root_module.addIncludePath(.{ .cwd_relative = target_include_dir });
 
     const api_dir = b.fmt("{d}", .{android_api_version});
     const lib_dir = b.pathJoin(&.{ ndk_sysroot, "usr", "lib", android_target, api_dir });
-    lib.addLibraryPath(.{ .cwd_relative = lib_dir });
+    lib.root_module.addLibraryPath(.{ .cwd_relative = lib_dir });
 
     lib.setLibCFile(libc_config);
-    lib.linkLibrary(libssh2);
-    lib.linkSystemLibrary("log");
-    lib.linkSystemLibrary("z");
-    lib.linkLibC();
+    lib.root_module.linkLibrary(libssh2);
+    lib.root_module.linkSystemLibrary("log", .{});
+    lib.root_module.linkSystemLibrary("z", .{});
+    lib.root_module.link_libc = true;
     lib.version_script = b.path("src/bridge/version-script.map");
 
     b.installArtifact(lib);
@@ -176,7 +190,7 @@ fn buildNativeLibrary(
 pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const build_targets = resolveBuildTargets(b);
-    const has_android_ndk = b.graph.env_map.get("ANDROID_NDK_HOME") != null or b.graph.env_map.get("ANDROID_NDK_ROOT") != null;
+    const has_android_ndk = b.graph.environ_map.get("ANDROID_NDK_HOME") != null or b.graph.environ_map.get("ANDROID_NDK_ROOT") != null;
 
     const native_step = b.step("native", "Build native JNI library");
     const jni_step = b.step("jni", "Build native library and copy to jniLibs");
@@ -221,7 +235,7 @@ pub fn build(b: *std.Build) void {
         openssl_test_step.dependOn(&ssl.step);
     }
 
-    const fmt_check = b.addFmt(.{ .paths = &.{ "src", "build.zig", "build.zig.zon" } });
+    const fmt_check = b.addFmt(.{ .paths = &.{ b.path("src"), b.path("build.zig"), b.path("build.zig.zon") } });
     const fmt_step = b.step("fmt", "Format Zig files");
     fmt_step.dependOn(&fmt_check.step);
 }

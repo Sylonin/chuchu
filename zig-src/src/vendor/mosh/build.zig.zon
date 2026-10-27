@@ -1,0 +1,10 @@
+.{
+    .name = .mosh,
+    .version = "0.0.0",
+    .fingerprint = 0xecf8bf80d60ec81f,
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

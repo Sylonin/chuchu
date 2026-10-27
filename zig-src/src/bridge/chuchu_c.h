@@ -1,0 +1,19 @@
+// Single translate-c entry point for all JNI bridge files (Zig 0.17 removed @cImport).
+#include <android/log.h>
+#include <arpa/inet.h>
+#include "chuchu_jni_internal.h"
+#include <errno.h>
+#include <time.h>
+#include <fcntl.h>
+#include <jni.h>
+#include <libssh2.h>
+#include <libssh2_sftp.h>
+#include <netdb.h>
+#include <poll.h>
+#include <signal.h>
+#include <stdlib.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <sys/wait.h>
+#include <termios.h>
+#include <unistd.h>

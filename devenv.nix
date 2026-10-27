@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ pkgs, inputs, ... }:
 
 {
   android = {
@@ -18,7 +18,7 @@
 
   languages.zig = {
     enable = true;
-    package = pkgs.zig_0_15;
+    package = inputs.nixpkgs-zig.legacyPackages.${pkgs.stdenv.system}.zig_0_17;
   };
 
   # AGP 8.13 needs Gradle 8.13+; nixpkgs' `gradle_8` satisfies this and avoids
