@@ -10,6 +10,8 @@ object TmuxMultiplexer : Multiplexer {
     override fun availabilityCommand(): String = "command -v tmux >/dev/null 2>&1"
 
     override fun listSessionsCommand(): String =
+        // Do not name this variable `status`: in zsh `status` is a read-only alias
+        // for `$?`, so assigning it aborts the command and the exit marker is never printed.
         "if ! command -v tmux >/dev/null 2>&1; then printf 'tmux executable not found\\n' >&2; false; " +
             "else tmux list-sessions -F '#{session_attached} #{session_name}' 2>/dev/null; " +
             "rc=\$?; if [ \"\$rc\" -eq 1 ]; then true; else [ \"\$rc\" -eq 0 ]; fi; fi"
@@ -24,9 +26,13 @@ object TmuxMultiplexer : Multiplexer {
                 if (separatorIndex == -1) return@mapNotNull null
                 val name = trimmed.substring(separatorIndex + 1)
                 if (name.isBlank()) return@mapNotNull null
+                val attachedCount = trimmed.substring(0, separatorIndex)
+                    .toIntOrNull()
+                    ?.takeIf { it >= 0 }
+                    ?: return@mapNotNull null
                 RemoteMultiplexerSession(
                     name = name,
-                    attached = trimmed.substring(0, separatorIndex).toIntOrNull()?.let { it > 0 } == true,
+                    attached = attachedCount > 0,
                 )
             }
             .toList()

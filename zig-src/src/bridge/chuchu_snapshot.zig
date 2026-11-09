@@ -3,19 +3,9 @@ const ghostty = @import("ghostty-vt");
 const zignal_png = @import("zignal_png.zig");
 
 const c = @import("c");
+const jni_io = @import("io.zig");
 
 const allocator = std.heap.c_allocator;
-
-// ghostty's Terminal needs an Io for kitty-graphics file reads; a single-threaded one suffices
-// because each terminal is driven from one thread at a time.
-var ghostty_io_impl: std.Io.Threaded = .init_single_threaded;
-const ghostty_io = ghostty_io_impl.io();
-
-fn nanoTimestamp() i96 {
-    var ts: std.os.linux.timespec = undefined;
-    _ = std.os.linux.clock_gettime(.REALTIME, &ts);
-    return @as(i96, ts.sec) * std.time.ns_per_s + ts.nsec;
-}
 const LOG_TAG = "ChuKittyNative";
 const verbose_kitty_logs = false;
 const verbose_snapshot_perf_logs = false;
@@ -120,6 +110,7 @@ fn appHandlesSelectionDrag(event: anytype) bool {
 }
 
 const ChuchuTerminal = struct {
+    io: std.Io,
     terminal: ghostty.Terminal,
     render_state: ghostty.RenderState = .empty,
     stream_handler: ChuchuStreamHandler = undefined,
@@ -143,10 +134,10 @@ const ChuchuTerminal = struct {
     clipboard_len: usize = 0,
     clipboard_dirty: bool = false,
     bell_count: u32 = 0,
-    snapshot_buffer: std.ArrayListUnmanaged(u8) = .empty,
-    snapshot_extras_scratch: std.ArrayListUnmanaged(u32) = .empty,
-    image_snapshot_buffer: std.ArrayListUnmanaged(u8) = .empty,
-    pty_write_buffer: std.ArrayListUnmanaged(u8) = .empty,
+    snapshot_buffer: std.ArrayList(u8) = .empty,
+    snapshot_extras_scratch: std.ArrayList(u32) = .empty,
+    image_snapshot_buffer: std.ArrayList(u8) = .empty,
+    pty_write_buffer: std.ArrayList(u8) = .empty,
     pty_write_len: usize = 0,
     snapshot_perf_calls: u64 = 0,
     snapshot_perf_total_ns: u64 = 0,
@@ -291,7 +282,7 @@ fn maybeLogSnapshotPerf(
     terminal.snapshot_perf_calls += 1;
     terminal.snapshot_perf_total_ns +%= total_u64;
 
-    const now: i64 = @intCast(nanoTimestamp());
+    const now: i64 = @intCast(jni_io.nowNs(terminal.io));
     const slow = total_ns >= 8 * std.time.ns_per_ms or update_ns >= 4 * std.time.ns_per_ms or build_ns >= 6 * std.time.ns_per_ms;
     const interval_elapsed = now - terminal.snapshot_perf_last_log_ns >= std.time.ns_per_s;
     if (!slow and !interval_elapsed) return;
@@ -334,7 +325,7 @@ fn logKittyState(stage: []const u8, terminal: *ChuchuTerminal) void {
     );
 }
 
-fn ensureListSize(list: *std.ArrayListUnmanaged(u8), size_needed: usize) ?[*]u8 {
+fn ensureListSize(list: *std.ArrayList(u8), size_needed: usize) ?[*]u8 {
     list.ensureTotalCapacityPrecise(allocator, size_needed) catch return null;
     list.items.len = size_needed;
     return list.items.ptr;
@@ -478,29 +469,36 @@ export fn update_render_state(terminal: ?*ChuchuTerminal) callconv(.c) void {
     updateMetadata(terminal.?);
 }
 
+fn kittyTempDir() []const u8 {
+    const tmpdir = c.getenv("TMPDIR");
+    if (tmpdir != null) return std.mem.span(tmpdir);
+    return "/tmp";
+}
+
 export fn chuchu_create_terminal(cols: c.jint, rows: c.jint, max_scrollback: c.jint) callconv(.c) c.jlong {
     ghostty.sys.decode_png = chuchuDecodePng;
 
+    const io = jni_io.get();
     const terminal = allocator.create(ChuchuTerminal) catch return 0;
     errdefer allocator.destroy(terminal);
 
     const init_cols: u16 = @intCast(clampI32(cols, 1, 80));
     const init_rows: u16 = @intCast(clampI32(rows, 1, 24));
-    var inner = ghostty.Terminal.init(ghostty_io, allocator, .{
+    var inner = ghostty.Terminal.init(io, allocator, .{
         .cols = init_cols,
         .rows = init_rows,
         .max_scrollback_bytes = @intCast(clampI32(max_scrollback, 0, 10000)),
         .kitty_image_storage_limit = 64 * 1024 * 1024,
         .kitty_image_loading_limits = .{
             .file = false,
-            // Newer libghostty requires a directory to accept temporary files; none is known here.
-            .temporary_file = .disabled,
+            .temporary_file = .{ .enabled = .{ .directory = kittyTempDir() } },
             .shared_memory = true,
         },
     }) catch return 0;
     errdefer inner.deinit(allocator);
 
     terminal.* = .{
+        .io = io,
         .terminal = inner,
         .stream_handler = undefined,
         .stream = undefined,
@@ -511,32 +509,19 @@ export fn chuchu_create_terminal(cols: c.jint, rows: c.jint, max_scrollback: c.j
     };
 
     var handler = terminal.terminal.vtHandler();
-    handler.effects = .{
-        .write_pty = chuchuWritePty,
-        .bell = chuchuBell,
-        .color_scheme = chuchuColorScheme,
-        .device_attributes = chuchuDeviceAttributes,
-        .desktop_notification = null,
-        .drag_and_drop = null,
-        .pwd_changed = chuchuTitleChanged,
-        .progress_report = null,
-        .program_status = null,
-        .semantic_prompt = null,
-        .reset = null,
-        .resize_window = null,
-        .clipboard_write = null,
-        .clipboard_read = null,
-        .render_hold = null,
-        .enquiry = null,
-        .size = chuchuSize,
-        .title_changed = chuchuTitleChanged,
-        .xtversion = chuchuXtversion,
-    };
+    handler.effects = .readonly;
+    handler.effects.write_pty = chuchuWritePty;
+    handler.effects.bell = chuchuBell;
+    handler.effects.color_scheme = chuchuColorScheme;
+    handler.effects.device_attributes = chuchuDeviceAttributes;
+    handler.effects.size = chuchuSize;
+    handler.effects.title_changed = chuchuTitleChanged;
+    handler.effects.xtversion = chuchuXtversion;
     terminal.stream_handler = .{
         .owner = terminal,
         .inner = handler,
     };
-    terminal.stream = ChuchuTerminalStream.init(.{ .handler = &terminal.stream_handler, .allocator = allocator });
+    terminal.stream = .init(.{ .handler = &terminal.stream_handler, .allocator = allocator });
     enableGraphemeClusterMode(terminal);
 
     update_render_state(terminal);
@@ -889,9 +874,9 @@ export fn chuchu_build_text_snapshot(handle: c.jlong, out_size: [*c]usize) callc
     const terminal = chuchuFromHandle(handle) orelse return null;
     if (out_size == null) return null;
 
-    const t_start = nanoTimestamp();
+    const t_start = jni_io.nowNs(terminal.io);
     update_render_state(terminal);
-    const t_after_update = nanoTimestamp();
+    const t_after_update = jni_io.nowNs(terminal.io);
 
     const cols: usize = terminal.render_state.cols;
     const rows: usize = terminal.render_state.rows;
@@ -1005,7 +990,7 @@ export fn chuchu_build_text_snapshot(handle: c.jlong, out_size: [*c]usize) callc
     if (extras_records == 0) {
         out_size.* = base_total_size;
 
-        const t_end = nanoTimestamp();
+        const t_end = jni_io.nowNs(terminal.io);
         maybeLogSnapshotPerf(
             terminal,
             cols,
@@ -1046,7 +1031,7 @@ export fn chuchu_build_text_snapshot(handle: c.jlong, out_size: [*c]usize) callc
 
     out_size.* = total_size;
 
-    const t_end = nanoTimestamp();
+    const t_end = jni_io.nowNs(terminal.io);
     maybeLogSnapshotPerf(
         terminal,
         cols,
@@ -1061,12 +1046,22 @@ export fn chuchu_build_text_snapshot(handle: c.jlong, out_size: [*c]usize) callc
     return buffer;
 }
 
+fn drawsBefore(
+    _: void,
+    a: ghostty.RenderState.ImagePlacement,
+    b: ghostty.RenderState.ImagePlacement,
+) bool {
+    const a_layer = @backingInt(a.layer);
+    const b_layer = @backingInt(b.layer);
+    if (a_layer != b_layer) return a_layer < b_layer;
+    return a.z < b.z;
+}
+
 fn allocRgba(pixel_count: usize) ?[]u8 {
     return allocator.alloc(u8, pixel_count * 4) catch null;
 }
 
 fn prepareImageData(image_id: u32, image: ghostty.kitty.graphics.Image) ?PreparedImageData {
-    // Pending data (payload not fully arrived) or an empty image has nothing to draw yet.
     const bytes = image.renderData().bytes() orelse return null;
     var data_ptr: [*c]const u8 = if (bytes.len == 0) null else bytes.ptr;
     var data_len: usize = bytes.len;
@@ -1192,16 +1187,22 @@ export fn chuchu_build_image_snapshot(handle: c.jlong, out_size: [*c]usize) call
     if (out_size == null) return null;
     logKittyState("image_snapshot_begin", terminal);
 
+    update_render_state(terminal);
+
+    var found: [MAX_KITTY_IMAGES]ghostty.RenderState.ImagePlacement = undefined;
+    var found_count: usize = 0;
+    var it = terminal.render_state.imagePlacementIterator();
+    while (found_count < MAX_KITTY_IMAGES) {
+        found[found_count] = it.next() orelse break;
+        found_count += 1;
+    }
+    std.sort.insertion(ghostty.RenderState.ImagePlacement, found[0..found_count], {}, drawsBefore);
+
+    const storage = &terminal.terminal.screens.active.kitty_images;
     var placements: [MAX_KITTY_IMAGES]PlacementInfo = undefined;
     var count: usize = 0;
-    // The render state resolves direct, relative and unicode-placeholder placements to final
-    // cell positions and pixel sizes, so no per-kind handling is needed here.
-    var it = terminal.render_state.imagePlacementIterator();
-    while (it.next()) |p| {
-        if (count >= MAX_KITTY_IMAGES) break;
-        if (p.width == 0 or p.height == 0) continue;
-
-        const image = terminal.terminal.screens.active.kitty_images.imageById(p.image_id) orelse continue;
+    for (found[0..found_count]) |p| {
+        const image = storage.imageById(p.image_id) orelse continue;
         const prepared = prepareImageData(p.image_id, image) orelse continue;
         placements[count] = .{
             .cell_col = p.x,
@@ -1334,8 +1335,11 @@ export fn chuchu_apply_default_colors(handle: c.jlong, has_fg: bool, fg: [*c]con
             const off = i * 3;
             colors[i] = .{ .r = palette[off], .g = palette[off + 1], .b = palette[off + 2] };
         }
-        terminal.terminal.colors.palette = ghostty.color.DynamicPalette.init(allocator, colors) catch return;
+        const next = ghostty.color.DynamicPalette.init(allocator, colors) catch return;
+        terminal.terminal.colors.palette.deinit(allocator);
+        terminal.terminal.colors.palette = next;
     } else {
+        terminal.terminal.colors.palette.deinit(allocator);
         terminal.terminal.colors.palette = .default;
     }
 
@@ -1375,15 +1379,17 @@ export fn chuchu_resize(handle: c.jlong, cols: c.jint, rows: c.jint, cell_width:
     const terminal = chuchuFromHandle(handle) orelse return;
     const new_cols: u16 = @intCast(clampI32(cols, 1, terminal.cols));
     const new_rows: u16 = @intCast(clampI32(rows, 1, terminal.rows));
-    terminal.terminal.resize(allocator, .{ .cols = new_cols, .rows = new_rows }) catch return;
+    const new_cell_width: u32 = @intCast(clampI32(cell_width, 1, 1));
+    const new_cell_height: u32 = @intCast(clampI32(cell_height, 1, 1));
+    terminal.terminal.resize(allocator, .{
+        .cols = new_cols,
+        .rows = new_rows,
+        .cell_size_px = .{ .width = new_cell_width, .height = new_cell_height },
+    }) catch return;
     terminal.cols = new_cols;
     terminal.rows = new_rows;
-    terminal.cell_width = @intCast(clampI32(cell_width, 1, 1));
-    terminal.cell_height = @intCast(clampI32(cell_height, 1, 1));
-    terminal.terminal.width_px = @as(u32, new_cols) * terminal.cell_width;
-    terminal.terminal.height_px = @as(u32, new_rows) * terminal.cell_height;
-
-    terminal.terminal.modes.set(.synchronized_output, false);
+    terminal.cell_width = new_cell_width;
+    terminal.cell_height = new_cell_height;
 
     // Emit a DEC 2048 in-band size report on resize. TUIs like Textual disable
     // their SIGWINCH fallback once mode 2048 is on and rely on this report.

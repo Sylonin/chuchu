@@ -12,6 +12,8 @@ import com.jossephus.chuchu.service.ssh.HostKeyStore
 import com.jossephus.chuchu.service.ssh.TailscaleStatusChecker
 import java.util.UUID
 import kotlinx.coroutines.CompletableDeferred
+
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -83,7 +85,8 @@ class TerminalSessionRepository private constructor(application: Application) {
     private val _preflightHostKeyPrompt = MutableStateFlow<HostKeyPrompt?>(null)
     private val preflightMutex = Mutex()
     private var preflightEngine: TerminalSessionEngine? = null
-    private var preflightHostKeyDecision: CompletableDeferred<Boolean>? = null
+    @Volatile private var preflightHostKeyDecision: CompletableDeferred<Boolean>? = null
+    @Volatile private var preflightGeneration = 0L
 
     private val activeHostKeyPrompt: StateFlow<HostKeyPrompt?> =
         activeTab
@@ -198,19 +201,23 @@ class TerminalSessionRepository private constructor(application: Application) {
     suspend fun listMultiplexerSessions(spec: TabSpec): List<RemoteMultiplexerSession> =
         withPreflightEngine { engine -> engine.listMultiplexerSessions(spec) }
 
-    private suspend fun <T> withPreflightEngine(block: suspend (TerminalSessionEngine) -> T): T =
-        preflightMutex.withLock { runPreflightWithHostKeyRetries(block) }
+    private suspend fun <T> withPreflightEngine(block: suspend (TerminalSessionEngine) -> T): T {
+        val generation = preflightGeneration
+        return preflightMutex.withLock { runPreflightWithHostKeyRetries(generation, block) }
+    }
 
     private suspend fun <T> runPreflightWithHostKeyRetries(
+        generation: Long,
         block: suspend (TerminalSessionEngine) -> T,
     ): T {
         while (true) {
             when (val attempt = runPreflightAttempt(block)) {
                 is PreflightAttempt.Completed -> return attempt.value
                 is PreflightAttempt.HostKeyVerificationRequired -> {
-                    if (!awaitPreflightHostKeyDecision(attempt.verification)) {
+                    if (!awaitPreflightHostKeyDecision(generation, attempt.verification)) {
                         throw IllegalStateException("Host key rejected")
                     }
+                    ensurePreflightCurrent(generation)
                     val prompt = attempt.verification.prompt
                     hostKeyStore.saveKey(
                         prompt.host,
@@ -221,6 +228,10 @@ class TerminalSessionRepository private constructor(application: Application) {
                 }
             }
         }
+    }
+
+    private fun ensurePreflightCurrent(generation: Long) {
+        check(preflightGeneration == generation) { "Disconnected while preparing the connection" }
     }
 
     private suspend fun <T> runPreflightAttempt(
@@ -241,7 +252,9 @@ class TerminalSessionRepository private constructor(application: Application) {
         preflightEngine = engine
         return try {
             PreflightAttempt.Completed(block(engine))
-        } catch (error: IllegalStateException) {
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
             verification?.let { PreflightAttempt.HostKeyVerificationRequired(it) } ?: throw error
         } finally {
             // A preflight key check must not retain a live libssh2 session while the
@@ -254,12 +267,14 @@ class TerminalSessionRepository private constructor(application: Application) {
     }
 
     private suspend fun awaitPreflightHostKeyDecision(
+        generation: Long,
         verification: PreflightHostKeyVerification,
     ): Boolean {
         val decision = CompletableDeferred<Boolean>()
         preflightHostKeyDecision = decision
-        _preflightHostKeyPrompt.value = verification.prompt
         return try {
+            ensurePreflightCurrent(generation)
+            _preflightHostKeyPrompt.value = verification.prompt
             decision.await()
         } finally {
             if (preflightHostKeyDecision === decision) {
@@ -358,6 +373,7 @@ class TerminalSessionRepository private constructor(application: Application) {
     }
 
     fun disconnect() {
+        preflightGeneration += 1
         preflightHostKeyDecision?.cancel()
         preflightHostKeyDecision = null
         preflightEngine?.dispose()
@@ -384,15 +400,47 @@ class TerminalSessionRepository private constructor(application: Application) {
     private fun activeSftpEngine(): TerminalSessionEngine? =
         activeTab.value?.takeIf { it.spec.transport != Transport.LocalShell }?.engine
 
-    private fun sftpEngineForTab(tabId: String): TerminalSessionEngine? =
-        _tabs.value.firstOrNull { it.id == tabId && it.spec.transport != Transport.LocalShell }?.engine
+    private fun sftpTab(tabId: String): TabSession? =
+        _tabs.value.firstOrNull { it.id == tabId && it.spec.transport != Transport.LocalShell }
 
-    suspend fun awaitTabConnected(tabId: String, timeoutMs: Long = 20_000) {
-        val tab = _tabs.value.firstOrNull { it.id == tabId && it.spec.transport != Transport.LocalShell } ?: return
-        if (tab.sessionState.value.status == SessionStatus.Connected) return
-        withTimeoutOrNull(timeoutMs) {
-            tab.sessionState.first { it.status == SessionStatus.Connected }
-        } ?: throw IllegalStateException("Timed out waiting for the session to reconnect")
+    private fun sftpEngineForTab(tabId: String): TerminalSessionEngine? = sftpTab(tabId)?.engine
+
+    private suspend fun <T> withSftpSession(
+        tabId: String,
+        operation: suspend (TerminalSessionEngine) -> T,
+    ): T? {
+        val tab = sftpTab(tabId) ?: return null
+        awaitSessionReady(tab)
+        return try {
+            operation(tab.engine)
+        } catch (err: CancellationException) {
+            throw err
+        } catch (err: Exception) {
+            if (!awaitReconnectAfterFailure(tab)) throw err
+            operation(tab.engine)
+        }
+    }
+
+    private suspend fun awaitSessionReady(tab: TabSession) {
+        val settled =
+            withTimeoutOrNull(SFTP_RECONNECT_TIMEOUT_MS) {
+                tab.sessionState.first {
+                    it.status != SessionStatus.Connecting && it.status != SessionStatus.Reconnecting
+                }
+            } ?: throw IllegalStateException("Timed out waiting for the session to reconnect")
+        if (settled.status != SessionStatus.Connected) {
+            throw IllegalStateException(
+                settled.error?.let { "Session is not connected: $it" } ?: "Session is not connected"
+            )
+        }
+    }
+
+    private suspend fun awaitReconnectAfterFailure(tab: TabSession): Boolean {
+        withTimeoutOrNull(SFTP_DROP_DETECTION_MS) {
+            tab.sessionState.first { it.status != SessionStatus.Connected }
+        } ?: return false
+        awaitSessionReady(tab)
+        return true
     }
 
     fun resize(
@@ -462,19 +510,19 @@ class TerminalSessionRepository private constructor(application: Application) {
         activeSftpEngine()?.sftpListDirectory(path) ?: emptyList()
 
     suspend fun sftpListDirectory(tabId: String, path: String): List<String> =
-        sftpEngineForTab(tabId)?.sftpListDirectory(path) ?: emptyList()
+        withSftpSession(tabId) { it.sftpListDirectory(path) } ?: emptyList()
 
     suspend fun sftpRealpath(path: String): String = activeSftpEngine()?.sftpRealpath(path) ?: "/"
 
     suspend fun sftpRealpath(tabId: String, path: String): String =
-        sftpEngineForTab(tabId)?.sftpRealpath(path) ?: "/"
+        withSftpSession(tabId) { it.sftpRealpath(path) } ?: "/"
 
     suspend fun sftpOpenWrite(path: String) {
         activeSftpEngine()?.sftpOpenWrite(path)
     }
 
     suspend fun sftpOpenWrite(tabId: String, path: String) {
-        sftpEngineForTab(tabId)?.sftpOpenWrite(path)
+        withSftpSession(tabId) { it.sftpOpenWrite(path) }
     }
 
     suspend fun sftpWriteChunk(data: ByteArray): Int = activeSftpEngine()?.sftpWriteChunk(data) ?: 0
@@ -491,13 +539,16 @@ class TerminalSessionRepository private constructor(application: Application) {
     }
 
     suspend fun sftpReadFile(tabId: String, path: String, maxBytes: Int): ByteArray =
-        sftpEngineForTab(tabId)?.sftpReadFile(path, maxBytes) ?: ByteArray(0)
+        withSftpSession(tabId) { it.sftpReadFile(path, maxBytes) } ?: ByteArray(0)
 
     suspend fun sftpDelete(tabId: String, path: String, isDirectory: Boolean) {
-        sftpEngineForTab(tabId)?.sftpDelete(path, isDirectory)
+        withSftpSession(tabId) { it.sftpDelete(path, isDirectory) }
     }
 
     companion object {
+        private const val SFTP_RECONNECT_TIMEOUT_MS = 20_000L
+        private const val SFTP_DROP_DETECTION_MS = 1_000L
+
         @Volatile private var instance: TerminalSessionRepository? = null
 
         fun getInstance(application: Application): TerminalSessionRepository {

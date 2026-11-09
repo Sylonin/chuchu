@@ -1,15 +1,15 @@
 package com.jossephus.chuchu.service.terminal
 
 import android.content.ClipData
+import android.os.SystemClock
 import android.util.Log
 import com.jossephus.chuchu.model.AuthMethod
 import com.jossephus.chuchu.model.MultiplexerType
 import com.jossephus.chuchu.model.Transport
 import com.jossephus.chuchu.service.mosh.MoshBootstrapParser
-import com.jossephus.chuchu.service.mosh.MoshEndpointResolver
+import com.jossephus.chuchu.service.mosh.MoshEndpointAddress
 import com.jossephus.chuchu.service.mosh.MoshEventType
 import com.jossephus.chuchu.service.mosh.MoshReconnectPolicy
-import com.jossephus.chuchu.service.mosh.MoshRuntimeState
 import com.jossephus.chuchu.service.mosh.MoshState
 import com.jossephus.chuchu.service.mosh.NativeMoshService
 import com.jossephus.chuchu.service.multiplexer.MultiplexerAvailability
@@ -113,7 +113,7 @@ class TerminalSessionEngine(
     @Volatile private var disposed = false
 
     private val bridge = GhosttyBridge()
-    private val moshConnectionStaleness = MoshConnectionStalenessTracker()
+    private val moshContact = MoshContactTracker()
     private val nativeSsh = NativeSshService(hostKeyPolicy = ::verifyHostKey)
     private val moshService = NativeMoshService()
 
@@ -805,7 +805,6 @@ class TerminalSessionEngine(
                     MoshEventType.EchoAck.code -> Unit
                     MoshEventType.StateChanged.code -> {
                         Log.d("TerminalSession", "MOSH: STATE_CHANGED: ${String(event.payload)}")
-                        moshService.pollState()?.let { updateMoshRuntimeStatus(it) }
                     }
                     MoshEventType.Diagnostic.code -> {
                         Log.d("TerminalSession", "MOSH: DIAG: ${String(event.payload)}")
@@ -824,7 +823,7 @@ class TerminalSessionEngine(
             // Check session health
             val runtime = moshService.pollState()
             if (runtime != null) {
-                updateMoshRuntimeStatus(runtime)
+                updateMoshContactStatus(runtime.pendingOutbound)
                 if (runtime.state == MoshState.Failed.code) {
                     failureCode = runtime.lastFailureCode
                     Log.e("TerminalSession", "MOSH: session FAILED code=$failureCode")
@@ -840,22 +839,15 @@ class TerminalSessionEngine(
         return failureCode
     }
 
-    private fun updateMoshSessionStatus(moshState: Int) {
-        val status = sessionStatusForMoshState(moshState) ?: return
-        updateSessionStatus(status)
-    }
-
-    private fun updateMoshRuntimeStatus(runtime: MoshRuntimeState) {
-        updateMoshSessionStatus(runtime.state)
-        moshConnectionStaleness.observe(runtime, System.currentTimeMillis())?.let { status ->
-            updateSessionStatus(status)
-        }
-    }
-
-    private fun updateSessionStatus(status: SessionStatus) {
-        if (_state.value.status != status) {
-            _state.value = _state.value.copy(status = status)
-        }
+    private fun updateMoshContactStatus(pendingOutbound: Int) {
+        val contactLost = moshContact.isContactLost(pendingOutbound, SystemClock.elapsedRealtime())
+        val next =
+            when (_state.value.status) {
+                SessionStatus.Connected -> if (contactLost) SessionStatus.Reconnecting else return
+                SessionStatus.Reconnecting -> if (contactLost) return else SessionStatus.Connected
+                else -> return
+            }
+        _state.value = _state.value.copy(status = next)
     }
 
     private suspend fun establishConnection(params: ConnectionParams, username: String) {
@@ -902,7 +894,7 @@ class TerminalSessionEngine(
 
     private suspend fun establishMoshConnection(params: ConnectionParams, username: String) {
         Log.d("TerminalSession", "MOSH: Phase 1 — SSH bootstrap start")
-        moshConnectionStaleness.reset()
+        moshContact.reset()
         check(nativeSsh.isAvailable()) { "Native SSH unavailable for mosh bootstrap" }
         nativeSsh.connect(
             host = params.host,
@@ -913,18 +905,16 @@ class TerminalSessionEngine(
             publicKeyOpenSsh = params.publicKeyOpenSsh,
             privateKeyPem = params.privateKeyPem,
             keyPassphrase = params.keyPassphrase,
+            ipv4Only = true,
         )
         val endpointHost =
             try {
-                withContext(Dispatchers.IO) { MoshEndpointResolver.resolve(params.host) }
-            } catch (error: IllegalStateException) {
+                MoshEndpointAddress.fromSshPeer(params.host, nativeSsh.peerAddress())
+            } catch (err: Exception) {
                 nativeSsh.close()
-                throw error
+                throw err
             }
-        Log.d(
-            "TerminalSession",
-            "MOSH: Resolved endpoint host=$endpointHost from profile host=${params.host}",
-        )
+        Log.d("TerminalSession", "MOSH: endpoint host=$endpointHost from profile host=${params.host}")
         // Use exec channel to bypass shell init noise and MOTD.
         // Falls back to shell if the remote server doesn't support exec.
         val moshCommand = MoshReconnectPolicy.bootstrapCommand()

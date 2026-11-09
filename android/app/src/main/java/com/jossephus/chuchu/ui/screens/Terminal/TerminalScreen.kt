@@ -64,6 +64,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -80,6 +82,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.jossephus.chuchu.data.repository.SettingsRepository
+import com.jossephus.chuchu.R
 import com.jossephus.chuchu.model.AuthMethod
 import com.jossephus.chuchu.model.HostProfile
 import com.jossephus.chuchu.model.Transport
@@ -194,7 +197,7 @@ private fun NewTabHostPicker(
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
             ) {
                 ChuText(
-                    "new session on $currentHostName",
+                    stringResource(R.string.terminal_new_session_on, currentHostName),
                     style = typography.label,
                     color = colors.textPrimary,
                 )
@@ -473,8 +476,17 @@ fun TerminalScreen(
     val showCustomActionsFab by settingsRepo.showCustomActionsFab.collectAsStateWithLifecycle()
     val builtinShortcuts by settingsRepo.builtinShortcuts.collectAsStateWithLifecycle()
     var fabFilteredActions by remember { mutableStateOf<List<TerminalCustomAction>?>(null) }
+    val builtinCommandLabels =
+        BuiltinCommand.entries.associateWith { stringResource(it.labelRes) }
     val chuchuKeys =
-        remember(vm, tabMode, currentTerminalCustomKeyGroups, builtinShortcuts, showCustomActionsFab) {
+        remember(
+            vm,
+            tabMode,
+            currentTerminalCustomKeyGroups,
+            builtinShortcuts,
+            showCustomActionsFab,
+            builtinCommandLabels,
+        ) {
             val isStrip = tabMode == TerminalTabMode.Strip
             val builtinCommandHandlers: Map<BuiltinCommand, () -> Unit> = mapOf(
                 BuiltinCommand.Tabs to {
@@ -498,6 +510,7 @@ fun TerminalScreen(
             )
             ChuchuKeyBindings.build(
                 builtinShortcuts = builtinShortcuts,
+                builtinLabels = builtinCommandLabels,
                 builtinCommandHandlers = builtinCommandHandlers,
                 customGroups = currentTerminalCustomKeyGroups,
                 onDispatchAction = { action ->
@@ -529,7 +542,7 @@ fun TerminalScreen(
         vm.openTab(
             TabSpec(
                 hostId = null,
-                displayName = "local shell",
+                displayName = context.getString(R.string.server_list_local_shell),
                 host = "localhost",
                 username = "android",
                 authMethod = AuthMethod.None,
@@ -586,8 +599,8 @@ fun TerminalScreen(
         if (requiresVerification) {
             requireUserVerification(
                 context = context,
-                title = "Verify to connect",
-                subtitle = "Authenticate to open this server session",
+                title = context.getString(R.string.verification_connect_title),
+                subtitle = context.getString(R.string.verification_connect_subtitle),
             ) { result ->
                 if (
                     result == VerificationResult.Success &&
@@ -622,7 +635,8 @@ fun TerminalScreen(
     }
     val pickerCurrentHostId = activeTab?.spec?.hostId ?: hostId
     val pickerCurrentHostName =
-        currentHostName ?: hosts.firstOrNull { it.id == pickerCurrentHostId }?.name ?: "current host"
+        currentHostName ?: hosts.firstOrNull { it.id == pickerCurrentHostId }?.name
+            ?: stringResource(R.string.terminal_current_host)
     val pickerOtherHosts =
         remember(hosts, pickerCurrentHostId) { hosts.filter { it.id != pickerCurrentHostId } }
     val openNewSessionForHost: (Long) -> Unit = { pickerHostId ->
@@ -709,8 +723,8 @@ fun TerminalScreen(
 
     if (showPassphrasePrompt) {
         ChuDialog(
-            title = "Key passphrase",
-            confirmLabel = "Connect",
+            title = stringResource(R.string.terminal_key_passphrase),
+            confirmLabel = stringResource(R.string.dialog_confirm_connect),
             onConfirm = {
                 val spec = pendingTabSpec
                 showPassphrasePrompt = false
@@ -739,7 +753,7 @@ fun TerminalScreen(
             ChuTextField(
                 value = passphraseInput,
                 onValueChange = { passphraseInput = it },
-                label = "Passphrase",
+                label = stringResource(R.string.field_passphrase),
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth(),
@@ -748,7 +762,7 @@ fun TerminalScreen(
     }
 
     fun showLocalShellFilesUnsupported() {
-        val message = "Files are not supported for local shell"
+        val message = context.getString(R.string.terminal_files_unsupported)
         localShellFilesMessage = message
         Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
     }
@@ -766,7 +780,8 @@ fun TerminalScreen(
         val previous = lastSessionStatus
         lastSessionStatus = sessionState.status
         if (sessionState.status == SessionStatus.Error && previous != SessionStatus.Error) {
-            val message = sessionState.error ?: "Connection failed"
+            val message =
+                sessionState.error ?: context.getString(R.string.terminal_connection_failed)
             Toast.makeText(context, message, Toast.LENGTH_LONG).show()
         }
     }
@@ -775,9 +790,9 @@ fun TerminalScreen(
         val prompt = hostKeyPrompt
         ChuDialog(
             onDismiss = { vm.onHostKeyDecision(false) },
-            title = "Verify host key",
-            confirmLabel = "Accept",
-            dismissLabel = "Reject",
+            title = stringResource(R.string.terminal_hostkey_title),
+            confirmLabel = stringResource(R.string.action_accept),
+            dismissLabel = stringResource(R.string.action_reject),
             onConfirm = { vm.onHostKeyDecision(true) },
             properties = DialogProperties(
                 dismissOnBackPress = false,
@@ -786,13 +801,33 @@ fun TerminalScreen(
         ) {
             val previous = prompt?.previousFingerprint
             val message = buildString {
-                append("Host: ${prompt?.host}:${prompt?.port}\n")
-                append("Algorithm: ${prompt?.algorithm}\n")
+                append(
+                    context.getString(
+                        R.string.terminal_hostkey_host,
+                        prompt?.host.orEmpty(),
+                        prompt?.port?.toString().orEmpty(),
+                    )
+                )
+                append('\n')
+                append(
+                    context.getString(
+                        R.string.terminal_hostkey_algorithm,
+                        prompt?.algorithm.orEmpty(),
+                    )
+                )
+                append('\n')
                 if (previous != null) {
-                    append("WARNING: host key changed!\n")
-                    append("Old: $previous\n")
+                    append(context.getString(R.string.terminal_hostkey_changed_warning))
+                    append('\n')
+                    append(context.getString(R.string.terminal_hostkey_old, previous))
+                    append('\n')
                 }
-                append("New: ${prompt?.fingerprint}")
+                append(
+                    context.getString(
+                        R.string.terminal_hostkey_new,
+                        prompt?.fingerprint.orEmpty(),
+                    )
+                )
             }
             ChuText(message, style = typography.body)
         }
@@ -806,6 +841,12 @@ fun TerminalScreen(
     }
     val displaySessionStatus =
         if (multiplexerState.preflightLoading) SessionStatus.Connecting else sessionState.status
+    val dismissMultiplexerLabel =
+        if (multiplexerState.reconnectRecovery) {
+            stringResource(R.string.action_dismiss)
+        } else {
+            stringResource(R.string.action_back)
+        }
     when (displaySessionStatus) {
         SessionStatus.Disconnected,
         SessionStatus.Error -> {
@@ -828,7 +869,7 @@ fun TerminalScreen(
                             TerminalRecoveryActions(
                                 message = errorMessage,
                                 isMultiplexerPreflight = preflightError != null,
-                                dismissMultiplexerLabel = if (multiplexerState.reconnectRecovery) "dismiss" else "back",
+                                dismissMultiplexerLabel = dismissMultiplexerLabel,
                                 onRetryMultiplexer = vm::retryPendingMultiplexerOpen,
                                 onConnectWithoutMultiplexer = {
                                     if (vm.connectPendingWithoutMultiplexer()) {
@@ -841,7 +882,7 @@ fun TerminalScreen(
                         } else if (tabs.isEmpty()) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 ChuText(
-                                    "no terminal sessions",
+                                    stringResource(R.string.tabs_empty),
                                     style = typography.body,
                                     color = colors.textMuted,
                                 )
@@ -853,7 +894,7 @@ fun TerminalScreen(
                                     bracketed = true,
                                 ) {
                                     ChuText(
-                                        "+ new connection",
+                                        stringResource(R.string.tabs_new_connection_row),
                                         style = typography.label,
                                         color = colors.accent,
                                     )
@@ -873,7 +914,7 @@ fun TerminalScreen(
                         TerminalRecoveryActions(
                             message = errorMessage,
                             isMultiplexerPreflight = preflightError != null,
-                            dismissMultiplexerLabel = if (multiplexerState.reconnectRecovery) "dismiss" else "back",
+                            dismissMultiplexerLabel = dismissMultiplexerLabel,
                             onRetryMultiplexer = vm::retryPendingMultiplexerOpen,
                             onConnectWithoutMultiplexer = {
                                 if (vm.connectPendingWithoutMultiplexer()) {
@@ -890,7 +931,7 @@ fun TerminalScreen(
 
         SessionStatus.Connecting -> {
             val hostLabel = if (multiplexerState.preflightLoading) {
-                "${multiplexerState.preflightHostLabel ?: "server"}..."
+                "${multiplexerState.preflightHostLabel ?: stringResource(R.string.terminal_unknown_server)}..."
             } else if (tabMode == TerminalTabMode.Strip) {
                 activeTab?.spec?.tabLabel?.let { "$it..." } ?: "..."
             } else {
@@ -911,7 +952,7 @@ fun TerminalScreen(
                         contentAlignment = Alignment.Center,
                     ) {
                         ChuText(
-                            "Connecting to $hostLabel",
+                            stringResource(R.string.terminal_connecting_to, hostLabel),
                             style = typography.body,
                         )
                     }
@@ -922,7 +963,7 @@ fun TerminalScreen(
                     verticalArrangement = Arrangement.Center,
                 ) {
                     ChuText(
-                        "Connecting to $hostLabel",
+                        stringResource(R.string.terminal_connecting_to, hostLabel),
                         style = typography.body,
                     )
                 }
@@ -1058,8 +1099,18 @@ fun TerminalScreen(
 
                     fun copySelection() {
                         val text = selectionState?.text ?: return
-                        clipboard?.setPrimaryClip(ClipData.newPlainText("terminal selection", text))
-                        Toast.makeText(context, "Copied selection", Toast.LENGTH_SHORT).show()
+                        clipboard?.setPrimaryClip(
+                            ClipData.newPlainText(
+                                context.getString(R.string.terminal_clipboard_selection_label),
+                                text,
+                            )
+                        )
+                        Toast.makeText(
+                                context,
+                                context.getString(R.string.terminal_copied_selection),
+                                Toast.LENGTH_SHORT,
+                            )
+                            .show()
                         selection = null
                         selectionState = null
                     }
@@ -1149,10 +1200,25 @@ fun TerminalScreen(
                                 withContext(Dispatchers.Main) {
                                     val msg =
                                         when {
-                                            failed == 0 -> "Uploaded $success file(s)"
+                                            failed == 0 ->
+                                                context.resources.getQuantityString(
+                                                    R.plurals.terminal_uploaded_files,
+                                                    success,
+                                                    success,
+                                                )
                                             lastError != null ->
-                                                "Uploaded $success, $failed failed: $lastError"
-                                            else -> "Uploaded $success, $failed failed"
+                                                context.getString(
+                                                    R.string.terminal_uploaded_some_failed_reason,
+                                                    success,
+                                                    failed,
+                                                    lastError,
+                                                )
+                                            else ->
+                                                context.getString(
+                                                    R.string.terminal_uploaded_some_failed,
+                                                    success,
+                                                    failed,
+                                                )
                                         }
                                     Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                                 }
@@ -1185,7 +1251,10 @@ fun TerminalScreen(
                                         withContext(Dispatchers.Main) {
                                             Toast.makeText(
                                                     context,
-                                                    "Downloaded ${pendingDownloadName}",
+                                                    context.getString(
+                                                        R.string.terminal_downloaded,
+                                                        pendingDownloadName,
+                                                    ),
                                                     Toast.LENGTH_SHORT,
                                                 )
                                                 .show()
@@ -1195,7 +1264,10 @@ fun TerminalScreen(
                                         withContext(Dispatchers.Main) {
                                             Toast.makeText(
                                                     context,
-                                                    "Download failed: ${it.message}",
+                                                    context.getString(
+                                                        R.string.terminal_download_failed,
+                                                        it.message.orEmpty(),
+                                                    ),
                                                     Toast.LENGTH_LONG,
                                                 )
                                                 .show()
@@ -1241,7 +1313,7 @@ fun TerminalScreen(
                             ) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     ChuText(
-                                        "no terminal sessions",
+                                        stringResource(R.string.tabs_empty),
                                         style = typography.body,
                                         color = colors.textMuted,
                                     )
@@ -1253,7 +1325,7 @@ fun TerminalScreen(
                                         bracketed = true,
                                     ) {
                                         ChuText(
-                                            "+ new connection",
+                                            stringResource(R.string.tabs_new_connection_row),
                                             style = typography.label,
                                             color = colors.accent,
                                         )
@@ -1271,8 +1343,17 @@ fun TerminalScreen(
                                     vm.selectConnectionTab(ConnectionTab.Terminal)
                                 },
                                 onCopyPath = { path ->
-                                    clipboard?.setPrimaryClip(ClipData.newPlainText("path", path))
-                                    Toast.makeText(context, "Copied path", Toast.LENGTH_SHORT)
+                                    clipboard?.setPrimaryClip(
+                                        ClipData.newPlainText(
+                                            context.getString(R.string.terminal_clipboard_path_label),
+                                            path,
+                                        )
+                                    )
+                                    Toast.makeText(
+                                            context,
+                                            context.getString(R.string.terminal_copied_path),
+                                            Toast.LENGTH_SHORT,
+                                        )
                                         .show()
                                 },
                                 onImportFile = { importFileLauncher.launch("*/*") },
@@ -1307,7 +1388,7 @@ fun TerminalScreen(
                                                     context.startActivity(
                                                         Intent.createChooser(
                                                             viewIntent,
-                                                            "Open with",
+                                                            context.getString(R.string.terminal_open_with),
                                                         )
                                                     )
                                                 }
@@ -1316,7 +1397,10 @@ fun TerminalScreen(
                                                 withContext(Dispatchers.Main) {
                                                     Toast.makeText(
                                                             context,
-                                                            "Open failed: ${it.message}",
+                                                            context.getString(
+                                                                R.string.terminal_open_failed,
+                                                                it.message.orEmpty(),
+                                                            ),
                                                             Toast.LENGTH_LONG,
                                                         )
                                                         .show()
@@ -1340,7 +1424,10 @@ fun TerminalScreen(
                                                 withContext(Dispatchers.Main) {
                                                     Toast.makeText(
                                                             context,
-                                                            "Download failed: ${it.message}",
+                                                            context.getString(
+                                                                R.string.terminal_download_failed,
+                                                                it.message.orEmpty(),
+                                                            ),
                                                             Toast.LENGTH_LONG,
                                                         )
                                                         .show()
@@ -1352,9 +1439,9 @@ fun TerminalScreen(
                             )
                             pendingDeleteEntry?.let { entry ->
                                 ChuDialog(
-                                    title = "Delete ${entry.name}?",
-                                    confirmLabel = "Delete",
-                                    dismissLabel = "Cancel",
+                                    title = stringResource(R.string.terminal_delete_file_title, entry.name),
+                                    confirmLabel = stringResource(R.string.dialog_confirm_delete),
+                                    dismissLabel = stringResource(R.string.dialog_dismiss),
                                     onConfirm = {
                                         val tabId = activeTabId ?: run {
                                             pendingDeleteEntry = null
@@ -1367,7 +1454,10 @@ fun TerminalScreen(
                                                     withContext(Dispatchers.Main) {
                                                         Toast.makeText(
                                                                 context,
-                                                                "Deleted ${entry.name}",
+                                                                context.getString(
+                                                                    R.string.terminal_deleted_file,
+                                                                    entry.name,
+                                                                ),
                                                                 Toast.LENGTH_SHORT,
                                                             )
                                                             .show()
@@ -1377,7 +1467,10 @@ fun TerminalScreen(
                                                     withContext(Dispatchers.Main) {
                                                         Toast.makeText(
                                                                 context,
-                                                                "Delete failed: ${it.message}",
+                                                                context.getString(
+                                                                    R.string.terminal_delete_failed,
+                                                                    it.message.orEmpty(),
+                                                                ),
                                                                 Toast.LENGTH_LONG,
                                                             )
                                                             .show()
@@ -1388,7 +1481,7 @@ fun TerminalScreen(
                                     onDismiss = { pendingDeleteEntry = null },
                                 ) {
                                     ChuText(
-                                        "This action cannot be undone.",
+                                        stringResource(R.string.terminal_delete_warning),
                                         style = typography.body,
                                     )
                                 }
@@ -1439,14 +1532,21 @@ fun TerminalScreen(
                                     if (isReconnecting) {
                                         ChuText(
                                             text =
-                                                "Reconnecting${sessionState.reconnectAttempt.takeIf { it > 0 }?.let { " ($it)" } ?: ""}",
+                                                if (sessionState.reconnectAttempt > 0) {
+                                                    stringResource(
+                                                        R.string.terminal_reconnecting_attempt,
+                                                        sessionState.reconnectAttempt,
+                                                    )
+                                                } else {
+                                                    stringResource(R.string.terminal_reconnecting)
+                                                },
                                             style = typography.labelSmall,
                                             color = colors.error,
                                         )
                                     }
                                     if (multiplexerState.duplicateLoading) {
                                         ChuText(
-                                            text = "Preparing new multiplexer session...",
+                                            text = stringResource(R.string.terminal_preparing_mux),
                                             style = typography.labelSmall,
                                             color = colors.textMuted,
                                         )
@@ -1534,7 +1634,7 @@ fun TerminalScreen(
                                                     ),
                                             ) {
                                                 ChuText(
-                                                    "copy",
+                                                    stringResource(R.string.action_copy),
                                                     style = typography.label,
                                                     color = colors.textMuted,
                                                 )
@@ -1553,7 +1653,7 @@ fun TerminalScreen(
                                                     ),
                                             ) {
                                                 ChuText(
-                                                    "paste",
+                                                    stringResource(R.string.action_paste),
                                                     style = typography.label,
                                                     color = colors.textMuted,
                                                 )
@@ -1937,9 +2037,9 @@ fun TerminalScreen(
                             val hostForMessage = activeTab?.spec?.tabLabel?.let { " $it" } ?: ""
                             val message =
                                 if (isReconnecting) {
-                                    "Reconnecting to${hostForMessage}..."
+                                    stringResource(R.string.terminal_reconnecting_to, hostForMessage)
                                 } else {
-                                    "Preparing terminal..."
+                                    stringResource(R.string.terminal_preparing)
                                 }
                             ChuText(message, style = typography.body)
                         }
@@ -1952,9 +2052,9 @@ fun TerminalScreen(
                         val hostForMessage = activeTabForHost?.spec?.host?.let { " $it" } ?: ""
                         val message =
                             if (isReconnecting) {
-                                "Reconnecting to${hostForMessage}..."
+                                stringResource(R.string.terminal_reconnecting_to, hostForMessage)
                             } else {
-                                "Preparing terminal..."
+                                stringResource(R.string.terminal_preparing)
                             }
                         ChuText(message, style = typography.body)
                     }
@@ -2003,7 +2103,7 @@ fun TerminalScreen(
 private fun TerminalRecoveryActions(
     message: String,
     isMultiplexerPreflight: Boolean,
-    dismissMultiplexerLabel: String = "back",
+    dismissMultiplexerLabel: String? = null,
     onRetryMultiplexer: () -> Unit,
     onConnectWithoutMultiplexer: () -> Unit,
     onBack: () -> Unit,
@@ -2020,7 +2120,11 @@ private fun TerminalRecoveryActions(
                 modifier = Modifier.fillMaxWidth(),
                 variant = ChuButtonVariant.Filled,
             ) {
-                ChuText("retry multiplexer", style = typography.label, color = colors.onAccent)
+                ChuText(
+                    stringResource(R.string.terminal_retry_multiplexer),
+                    style = typography.label,
+                    color = colors.onAccent,
+                )
             }
             Spacer(modifier = Modifier.height(8.dp))
             ChuButton(
@@ -2029,7 +2133,10 @@ private fun TerminalRecoveryActions(
                 variant = ChuButtonVariant.Outlined,
                 bracketed = true,
             ) {
-                ChuText("connect without multiplexer", style = typography.label)
+                ChuText(
+                    stringResource(R.string.terminal_connect_without_mux),
+                    style = typography.label,
+                )
             }
             Spacer(modifier = Modifier.height(8.dp))
             ChuButton(
@@ -2039,7 +2146,11 @@ private fun TerminalRecoveryActions(
                 bracketed = true,
                 borderColor = colors.textMuted,
             ) {
-                ChuText(dismissMultiplexerLabel, style = typography.label, color = colors.textMuted)
+                ChuText(
+                    dismissMultiplexerLabel ?: stringResource(R.string.action_back),
+                    style = typography.label,
+                    color = colors.textMuted,
+                )
             }
         } else {
             ChuButton(
@@ -2047,7 +2158,11 @@ private fun TerminalRecoveryActions(
                 modifier = Modifier.fillMaxWidth(),
                 variant = ChuButtonVariant.Filled,
             ) {
-                ChuText("Retry", style = typography.label, color = colors.onAccent)
+                ChuText(
+                    stringResource(R.string.action_retry),
+                    style = typography.label,
+                    color = colors.onAccent,
+                )
             }
         }
     }
@@ -2092,7 +2207,12 @@ private fun UploadProgressDialog(progress: UploadProgress) {
 
             if (progress.totalFiles > 1) {
                 ChuText(
-                    text = "file ${progress.fileIndex + 1} of ${progress.totalFiles}",
+                    text =
+                        stringResource(
+                            R.string.terminal_file_progress,
+                            progress.fileIndex + 1,
+                            progress.totalFiles,
+                        ),
                     style = typography.labelSmall,
                     color = colors.textMuted,
                 )

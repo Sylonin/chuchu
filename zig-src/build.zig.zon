@@ -1,10 +1,11 @@
 .{
     .name = .chuchu,
     .version = "0.0.0",
+    .minimum_zig_version = "0.17.0",
     .dependencies = .{
         .ghostty = .{
-            .url = "git+https://github.com/ghostty-org/ghostty#46e9dc9a927b2e7e7cba79e6902c176127dbdf2c",
-            .hash = "ghostty-1.4.1-dev-5UdBC6a2hwWxsh3KUfHr0uViBrYMgsckbLmAq-oigugi",
+            .url = "git+https://github.com/ghostty-org/ghostty#ca91d0a24e67b3eecdb23c943227cd2b3908747b",
+            .hash = "ghostty-1.4.1-dev-5UdBC-VdiAUPjIxn93BfW5tNFYhsx9HyIJD23opWW6HE",
         },
         .zigimg = .{
             .url = "git+https://github.com/zigimg/zigimg#083d0304840a3f5fd547c2e2005148a18886c401",
@@ -13,8 +14,18 @@
         .libssh2 = .{
             .path = "src/vendor/libssh2",
         },
-        .mosh = .{ .path = "src/vendor/mosh" },
-        .openssl = .{ .path = "src/vendor/openssl" },
+        .mosh = .{
+            .url = "git+https://github.com/jossephus/zig-mosh-client#02843a7d3533c3e627d93522796c70e3057e3141",
+            .hash = "mosh-0.0.0-H8gO1iYcAgAxeUCk65L-W7RC7USGLGpUz1eOSCecJfg3",
+        },
+        .openssl = .{
+            .url = "git+https://github.com/jossephus/openssl-zig#c9e173f10ecc2cbcfca487207c8e7b1983426873",
+            .hash = "openssl-3.6.0-wZcA72kq8gFZJg-TxgrT6Qlz_kfo-I5RQ2mnW7XmZMZT",
+        },
+        .translate_c = .{
+            .url = "git+https://codeberg.org/ziglang/translate-c?ref=zig-0.17.x#cfac21f3199b2b02ce3fd7db652aa456421fe4ab",
+            .hash = "translate_c-2.0.2-Q_BUWvBNBwDnyehSiuAJmdFcMYHYGA-Jc3KiYdrV2Dqx",
+        },
     },
     .fingerprint = 0xddba11030bd5a50,
     .paths = .{

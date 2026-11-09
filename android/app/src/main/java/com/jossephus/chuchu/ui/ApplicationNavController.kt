@@ -20,6 +20,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.jossephus.chuchu.R
+import com.jossephus.chuchu.data.db.AppDatabase
+import com.jossephus.chuchu.data.repository.HostRepository
 import com.jossephus.chuchu.data.repository.SettingsRepository
 import com.jossephus.chuchu.ui.screens.AddServer.AddServerScreen
 import com.jossephus.chuchu.ui.screens.AddServer.AddServerViewModel
@@ -30,8 +33,6 @@ import com.jossephus.chuchu.ui.screens.Settings.SettingsBackupViewModel
 import com.jossephus.chuchu.ui.screens.Settings.SettingsScreen
 import com.jossephus.chuchu.ui.screens.Terminal.TerminalScreen
 import com.jossephus.chuchu.ui.screens.Terminal.TerminalViewModel
-import com.jossephus.chuchu.data.db.AppDatabase
-import com.jossephus.chuchu.data.repository.HostRepository
 import com.jossephus.chuchu.ui.security.VerificationResult
 import com.jossephus.chuchu.ui.security.requireUserVerification
 
@@ -70,14 +71,15 @@ fun ApplicationNavController(launchHostId: Long? = null, onLaunchHostConsumed: (
         }
         requireUserVerification(
             context = context,
-            title = "Verify to connect",
-            subtitle = "Authenticate to open this server session",
+            title = context.getString(R.string.verification_connect_title),
+            subtitle = context.getString(R.string.verification_connect_subtitle),
         ) { result ->
             if (result == VerificationResult.Success) {
                 navController.navigate("terminal/$id")
             }
         }
     }
+
     NavHost(navController = navController, startDestination = "servers") {
         composable("servers") {
             val vm: ServerListViewModel =
@@ -101,8 +103,8 @@ fun ApplicationNavController(launchHostId: Long? = null, onLaunchHostConsumed: (
                         } else {
                             requireUserVerification(
                                 context = context,
-                                title = "Verify to open local shell",
-                                subtitle = "Authenticate to open this device shell",
+                                title = context.getString(R.string.verification_local_shell_title),
+                                subtitle = context.getString(R.string.verification_local_shell_subtitle),
                             ) { result ->
                                 if (result == VerificationResult.Success) {
                                     navController.navigate("terminal/local")
@@ -249,7 +251,7 @@ fun ApplicationNavController(launchHostId: Long? = null, onLaunchHostConsumed: (
         val id = launchHostId ?: return@LaunchedEffect
         val host = HostRepository(AppDatabase.getInstance(application).hostProfileDao()).getById(id)
         if (host == null) {
-            Toast.makeText(context, "That server no longer exists", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, R.string.shortcut_server_missing, Toast.LENGTH_SHORT).show()
         } else {
             connectToHost(host.id, host.requireAuthOnConnect)
         }
@@ -271,8 +273,8 @@ fun ApplicationNavController(launchHostId: Long? = null, onLaunchHostConsumed: (
             unlockPromptRequested = true
             requireUserVerification(
                 context = context,
-                title = "Unlock Chuchu",
-                subtitle = "Authenticate to continue",
+                title = context.getString(R.string.verification_unlock_title),
+                subtitle = context.getString(R.string.verification_unlock_subtitle),
             ) { result ->
                 appUnlocked = result == VerificationResult.Success
                 if (result != VerificationResult.Success) {

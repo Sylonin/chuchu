@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.jossephus.chuchu.R
 import com.jossephus.chuchu.data.db.AppDatabase
 import com.jossephus.chuchu.data.repository.HostRepository
 import com.jossephus.chuchu.data.repository.SettingsRepository
@@ -37,7 +38,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -48,10 +48,12 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class TerminalViewModel(application: Application) : AndroidViewModel(application) {
+    private val app = application
     private val tailscaleStatusChecker = TailscaleStatusChecker(application)
     private val sessionRepository = TerminalSessionRepository.getInstance(application)
     private val database = AppDatabase.getInstance(application)
@@ -198,7 +200,9 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                         },
                         onFailure = { error ->
                             _multiplexerState.value = _multiplexerState.value.copy(
-                                preflightError = error.message ?: "Could not create multiplexer session",
+                                preflightError =
+                                    error.message
+                                        ?: app.getString(R.string.terminal_error_create_mux),
                             )
                         },
                     )
@@ -243,14 +247,19 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         val reconnectRecovery = preparedAction is PendingMultiplexerAction.Reconnect
         if (spec.transport == Transport.Mosh) {
             _multiplexerState.value = MultiplexerUiState(
-                preflightError = "$label is not supported for Mosh connections",
+                preflightError =
+                    app.getString(R.string.terminal_error_mosh_unsupported, label),
                 reconnectRecovery = reconnectRecovery,
             )
             return
         }
         if (spec.multiplexer != null && spec.multiplexer.runtimeSupported.not()) {
             _multiplexerState.value = MultiplexerUiState(
-                preflightError = "${spec.multiplexer.label} is not supported yet",
+                preflightError =
+                    app.getString(
+                        R.string.terminal_error_multiplexer_unsupported,
+                        spec.multiplexer.label,
+                    ),
                 reconnectRecovery = reconnectRecovery,
             )
             return
@@ -261,41 +270,30 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
             reconnectRecovery = reconnectRecovery,
         )
         viewModelScope.launch(Dispatchers.IO) {
-            val result =
-                try {
-                    Result.success(
-                        sessionRepository.resolveMultiplexerSessionName(
-                            spec = spec,
-                            reuseDetachedChuchuSession =
-                                preparedAction is PendingMultiplexerAction.Open &&
-                                    spec.multiplexerSessionName.isNullOrBlank(),
-                        ),
-                    )
-                } catch (_: CancellationException) {
-                    withContext(NonCancellable + Dispatchers.Main) {
-                        reportMultiplexerActionStopped(actionGeneration, preparedAction)
-                    }
-                    return@launch
-                } catch (error: Exception) {
-                    Result.failure(error)
-                }
+            val result = runCatching {
+                sessionRepository.resolveMultiplexerSessionName(
+                    spec = spec,
+                    reuseDetachedChuchuSession =
+                        preparedAction is PendingMultiplexerAction.Open &&
+                            spec.multiplexerSessionName.isNullOrBlank(),
+                )
+            }
             withContext(Dispatchers.Main) {
-                if (isCurrentMultiplexerAction(actionGeneration, preparedAction)) {
-                    result.fold(
-                        onSuccess = { sessionName ->
-                            completeMultiplexerAction(actionGeneration, preparedAction, sessionName)
-                        },
-                        onFailure = { error ->
-                            _multiplexerState.value = _multiplexerState.value.copy(
-                                preflightLoading = false,
-                                preflightHostLabel = null,
-                                preflightError = error.message ?: "Could not prepare multiplexer session",
-                            )
-                        },
-                    )
-                } else {
-                    reportMultiplexerActionStopped(actionGeneration, preparedAction)
-                }
+                if (!isCurrentMultiplexerAction(actionGeneration, preparedAction)) return@withContext
+                result.fold(
+                    onSuccess = { sessionName ->
+                        completeMultiplexerAction(actionGeneration, preparedAction, sessionName)
+                    },
+                    onFailure = { error ->
+                        _multiplexerState.value = _multiplexerState.value.copy(
+                            preflightLoading = false,
+                            preflightHostLabel = null,
+                            preflightError =
+                                error.message
+                                    ?: app.getString(R.string.terminal_error_prepare_mux),
+                        )
+                    },
+                )
             }
         }
     }
@@ -308,48 +306,23 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         action: PendingMultiplexerAction,
         sessionName: String,
     ) {
-        if (isCurrentMultiplexerAction(actionGeneration, action)) {
-            val nextSpec = action.spec.copy(
-                multiplexer = action.spec.multiplexer ?: MultiplexerRegistry.defaultType,
-                multiplexerSessionName = sessionName,
-                multiplexerCreateIfMissing = action.spec.multiplexerCreateIfMissing,
-            )
-            pendingMultiplexerAction = null
-            _multiplexerState.value = MultiplexerUiState()
-            when (action) {
-                is PendingMultiplexerAction.Open -> openTab(nextSpec)
-                is PendingMultiplexerAction.Reconnect -> {
-                    if (!reconnectTabWithSpec(action.tabId, nextSpec)) {
-                        _multiplexerState.value = MultiplexerUiState(
-                            preflightError = "Terminal session is no longer available",
-                            reconnectRecovery = true,
-                        )
-                    }
+        if (!isCurrentMultiplexerAction(actionGeneration, action)) return
+        val nextSpec = action.spec.copy(
+            multiplexer = action.spec.multiplexer ?: MultiplexerRegistry.defaultType,
+            multiplexerSessionName = sessionName,
+            multiplexerCreateIfMissing = action.spec.multiplexerCreateIfMissing,
+        )
+        pendingMultiplexerAction = null
+        _multiplexerState.value = MultiplexerUiState()
+        when (action) {
+            is PendingMultiplexerAction.Open -> openTab(nextSpec)
+            is PendingMultiplexerAction.Reconnect -> {
+                if (!reconnectTabWithSpec(action.tabId, nextSpec)) {
+                    _multiplexerState.value = MultiplexerUiState(
+                        preflightError = app.getString(R.string.terminal_error_session_gone),
+                        reconnectRecovery = true,
+                    )
                 }
-            }
-        } else {
-            reportMultiplexerActionStopped(actionGeneration, action)
-        }
-    }
-
-    private fun reportMultiplexerActionStopped(
-        actionGeneration: Long,
-        action: PendingMultiplexerAction,
-    ) {
-        when {
-            isCurrentMultiplexerAction(actionGeneration, action) -> {
-                _multiplexerState.value = _multiplexerState.value.copy(
-                    preflightLoading = false,
-                    preflightHostLabel = null,
-                    preflightError = "Connection preparation was cancelled",
-                )
-            }
-
-            pendingMultiplexerAction == null -> {
-                _multiplexerState.value = MultiplexerUiState(
-                    preflightError = "Connection preparation was superseded",
-                    reconnectRecovery = action is PendingMultiplexerAction.Reconnect,
-                )
             }
         }
     }
@@ -396,7 +369,9 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                         _multiplexerState.value = _multiplexerState.value.copy(
                             sessions = emptyList(),
                             sessionsLoading = false,
-                            sessionsError = error.message ?: "Failed to list sessions",
+                            sessionsError =
+                                error.message
+                                    ?: app.getString(R.string.terminal_error_list_sessions),
                             sessionsSourceTabId = sourceTabId,
                             sessionsSourceHostId = sourceHostId,
                         )
@@ -423,7 +398,9 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                     },
                     onFailure = { error ->
                         _multiplexerState.value = _multiplexerState.value.copy(
-                            sessionsError = error.message ?: "Could not create multiplexer session",
+                            sessionsError =
+                                error.message
+                                    ?: app.getString(R.string.terminal_error_create_mux),
                         )
                     },
                 )
@@ -441,7 +418,7 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
             _multiplexerState.value = state.copy(
                 sessions = emptyList(),
                 sessionsLoading = false,
-                sessionsError = "Session list is stale. Refresh sessions and try again.",
+                sessionsError = app.getString(R.string.terminal_error_session_list_stale),
                 sessionsSourceTabId = activeTab?.id,
                 sessionsSourceHostId = activeHostId,
             )
@@ -648,7 +625,9 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
                         updateFileBrowserState(tabId) {
                             it.copy(
                                 isLoading = false,
-                                error = err.message ?: "Failed to list directory",
+                                error =
+                                    err.message
+                                        ?: app.getString(R.string.files_error_list_directory),
                             )
                         }
                     }
@@ -662,7 +641,6 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
         val tabId = activeTabId.value ?: return
         val current = _fileBrowserStateByTab.value[tabId] ?: return
         val targetPath = current.currentPath.trimEnd('/') + "/" + fileName
-        sessionRepository.awaitTabConnected(tabId)
         sessionRepository.sftpOpenWrite(tabId, targetPath)
     }
 
@@ -707,7 +685,6 @@ class TerminalViewModel(application: Application) : AndroidViewModel(application
     }
 
     suspend fun readFile(tabId: String, entry: FileBrowserEntry, maxBytes: Int): ByteArray {
-        sessionRepository.awaitTabConnected(tabId)
         return sessionRepository.sftpReadFile(tabId, entry.path, maxBytes)
     }
 
